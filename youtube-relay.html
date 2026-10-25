@@ -2,40 +2,76 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>vb-loadingscreen YouTube relay</title>
+<title>vb-loadingscreen YouTube relay v2</title>
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,#p{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+iframe,#p{position:absolute;inset:0;width:100%;height:100%;border:0}
+#dbg{position:absolute;left:8px;top:6px;z-index:5;font:12px/1.4 Consolas,monospace;color:#9fe;background:rgba(0,0,0,.6);padding:3px 7px;border-radius:5px;pointer-events:none}
+#snd{position:absolute;inset:0;z-index:4;display:none;align-items:center;justify-content:center;color:#fff;font:700 20px Arial,sans-serif;background:rgba(0,0,0,.25);cursor:pointer}
+</style>
 </head>
 <body>
 <div id="p"></div>
+<div id="dbg">relay v2: starting...</div>
+<div id="snd">Click for sound</div>
 <!--
-  HOST THIS ONE FILE on any https website (GitHub Pages, your own domain, Netlify...), then put its URL in
+  HOST THIS ONE FILE on any https website (GitHub Pages, your own domain...), then put its URL in
   config.js -> music.youtubeRelay. The loading screen loads it in an iframe, and because THIS page has a normal
-  https address YouTube accepts the embed (no "Error 153"). It only plays the video id it is given and reports
-  time/state back; it stores nothing.
+  https address YouTube accepts the embed (no "Error 153"). It plays only the video id it is given, reports
+  time/state back to the loading screen, and stores nothing. The small green text (top left) shows progress
+  until the video starts playing, then disappears.
 -->
-<script src="https://www.youtube.com/iframe_api"></script>
 <script>
-var q = new URLSearchParams(location.search), vid = q.get('v'), auto = q.get('autoplay') !== '0', yt = null, timer = 0;
+var q = new URLSearchParams(location.search), vid = q.get('v'), auto = q.get('autoplay') !== '0';
+var yt = null, started = false, standalone = (window.parent === window);
+var dbg = document.getElementById('dbg'), snd = document.getElementById('snd');
 function send(o) { o.__vbyt = 1; try { window.parent.postMessage(o, '*'); } catch (e) {} }
+function say(t) { if (!started) dbg.textContent = 'relay v2: ' + t; }
 function meta() { try { var d = yt.getVideoData() || {}; return { title: d.title || '', author: d.author || '' }; } catch (e) { return {}; } }
+
+send({ type: 'hello' });
+say('page running, loading YouTube API...');
+window.onerror = function (m) { say('script error: ' + m); send({ type: 'jserror', text: String(m) }); };
+
+// the callback MUST exist before the YouTube script is added
 window.onYouTubeIframeAPIReady = function () {
+  say('API loaded, creating player...'); send({ type: 'api' });
   yt = new YT.Player('p', {
     videoId: vid,
     playerVars: { autoplay: auto ? 1 : 0, controls: 0, rel: 0, playsinline: 1, modestbranding: 1, disablekb: 1, iv_load_policy: 3, fs: 0, origin: location.origin },
     events: {
       onReady: function () {
-        send({ type: 'ready' });
-        timer = setInterval(function () {
+        say('player ready'); send({ type: 'ready' });
+        setInterval(function () {
           var m = meta();
           try { send({ type: 'time', t: yt.getCurrentTime(), d: yt.getDuration(), title: m.title, author: m.author }); } catch (e) {}
         }, 400);
+        // autoplay with sound is blocked by most browsers: start muted instead
+        setTimeout(function () {
+          if (started || !auto) return;
+          try { yt.mute(); yt.playVideo(); } catch (e) {}
+          if (standalone) snd.style.display = 'flex';
+        }, 2000);
       },
-      onStateChange: function (e) { send({ type: 'state', s: e.data }); },
-      onError: function (e) { send({ type: 'error', code: e.data }); }
+      onStateChange: function (e) {
+        if (e.data === 1) { started = true; dbg.style.display = 'none'; }
+        else say('state ' + e.data);
+        send({ type: 'state', s: e.data });
+      },
+      onError: function (e) { say('YouTube error ' + e.data); send({ type: 'error', code: e.data }); }
     }
   });
+  send({ type: 'created' });
 };
+snd.onclick = function () { try { yt.unMute(); yt.playVideo(); } catch (e) {} snd.style.display = 'none'; };
+
+var sc = document.createElement('script');
+sc.src = 'https://www.youtube.com/iframe_api';
+sc.onerror = function () { say('YouTube API script was blocked'); send({ type: 'apierror' }); };
+document.head.appendChild(sc);
+setTimeout(function () { if (!yt) { say('YouTube API did not load in 8s'); send({ type: 'apislow' }); } }, 8000);
+
 window.addEventListener('message', function (e) {
   var d = e.data; if (!d || !d.__vbyt_cmd || !yt) return;
   try {
