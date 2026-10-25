@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vb-loadingscreen YouTube relay</title>
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,#p{position:absolute;inset:0;width:100%;height:100%;border:0}</style>
+</head>
+<body>
+<div id="p"></div>
+<!--
+  HOST THIS ONE FILE on any https website (GitHub Pages, your own domain, Netlify...), then put its URL in
+  config.js -> music.youtubeRelay. The loading screen loads it in an iframe, and because THIS page has a normal
+  https address YouTube accepts the embed (no "Error 153"). It only plays the video id it is given and reports
+  time/state back; it stores nothing.
+-->
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+var q = new URLSearchParams(location.search), vid = q.get('v'), auto = q.get('autoplay') !== '0', yt = null, timer = 0;
+function send(o) { o.__vbyt = 1; try { window.parent.postMessage(o, '*'); } catch (e) {} }
+function meta() { try { var d = yt.getVideoData() || {}; return { title: d.title || '', author: d.author || '' }; } catch (e) { return {}; } }
+window.onYouTubeIframeAPIReady = function () {
+  yt = new YT.Player('p', {
+    videoId: vid,
+    playerVars: { autoplay: auto ? 1 : 0, controls: 0, rel: 0, playsinline: 1, modestbranding: 1, disablekb: 1, iv_load_policy: 3, fs: 0, origin: location.origin },
+    events: {
+      onReady: function () {
+        send({ type: 'ready' });
+        timer = setInterval(function () {
+          var m = meta();
+          try { send({ type: 'time', t: yt.getCurrentTime(), d: yt.getDuration(), title: m.title, author: m.author }); } catch (e) {}
+        }, 400);
+      },
+      onStateChange: function (e) { send({ type: 'state', s: e.data }); },
+      onError: function (e) { send({ type: 'error', code: e.data }); }
+    }
+  });
+};
+window.addEventListener('message', function (e) {
+  var d = e.data; if (!d || !d.__vbyt_cmd || !yt) return;
+  try {
+    switch (d.cmd) {
+      case 'play': yt.playVideo(); break;
+      case 'pause': yt.pauseVideo(); break;
+      case 'mute': yt.mute(); break;
+      case 'unmute': yt.unMute(); break;
+      case 'volume': yt.setVolume(d.v); break;
+      case 'seek': yt.seekTo(d.v, true); break;
+    }
+  } catch (err) {}
+});
+</script>
+</body>
+</html>
